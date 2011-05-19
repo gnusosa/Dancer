@@ -1,8 +1,7 @@
-#!/usr/bin/perl
+package Dancer::Script
 
 use strict;
 use warnings;
-use Carp;
 
 use Dancer::Template::Simple;
 use Getopt::Long;
@@ -37,7 +36,6 @@ GetOptions(
 ) or pod2usage( -verbose => 1 );
 
 # main
-# This should go in the executable Script. 
 my $PERL_INTERPRETER = -r '/usr/bin/env' ? '#!/usr/bin/env perl' : "#!$^X";
 
 pod2usage( -verbose => 1 ) if $help;
@@ -60,6 +58,7 @@ version_check() if $do_check_dancer_version;
 safe_mkdir($DANCER_APP_DIR);
 create_node( app_tree($name), $DANCER_APP_DIR );
 
+# This should go to the script with the Dancer check version routine.
 unless (eval "require YAML") {
     print <<NOYAML;
 *****
@@ -79,6 +78,7 @@ NOYAML
 
 # subs
 
+# This should be part of the module.
 sub validate_app_name {
     my $name = shift;
     if ($name =~ /[^\w:]/ || $name =~ /^\d/ || $name =~ /\b:\b|:{3,}/) {
@@ -116,6 +116,7 @@ sub create_node($;$) {
     my ($node, $root) = @_;
     $root ||= '.';
 
+	# Dancer::FileUtils::write_file should be used here. 
     my $manifest_name = catfile($root => 'MANIFEST');
     open my $manifest, ">", $manifest_name or die $!;
 
@@ -281,6 +282,7 @@ sub send_http_request {
     }
 }
 
+# We must question if these must go in the script or the module.
 sub version_check {
     my $latest_version = 0;
     require Dancer;
