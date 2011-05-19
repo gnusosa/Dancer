@@ -3,8 +3,9 @@ package Dancer::FileUtils;
 use strict;
 use warnings;
 
-use File::Basename ();
-use File::Spec;
+use File::Basename 'basename', 'dirname';
+use File::Path 'mkpath';
+use File::Spec::Functions;
 use Carp;
 use Cwd 'realpath';
 
@@ -30,10 +31,10 @@ sub _trim_UNC {
     }
     return(@_);
 }
-sub d_catfile { File::Spec->catfile(_trim_UNC(@_)) }
-sub d_catdir { File::Spec->catdir(_trim_UNC(@_)) }
-sub d_canonpath { File::Spec->canonpath(_trim_UNC(@_)) }
-sub d_catpath { File::Spec->catpath(_trim_UNC(@_)) }
+sub d_catfile { catfile(_trim_UNC(@_)) }
+sub d_catdir { catdir(_trim_UNC(@_)) }
+sub d_canonpath { canonpath(_trim_UNC(@_)) }
+sub d_catpath { catpath(_trim_UNC(@_)) }
 sub d_splitpath { File::Spec->splitpath(_trim_UNC(@_)) }
 
 sub path { d_catfile(@_) }
@@ -44,7 +45,7 @@ sub path_no_verify {
 
     # [0->?] path(must exist),[last] file(maybe exists)
     if($nodes[1]) {
-        $path = realpath(File::Spec->catpath(@nodes[0 .. 1],'')) . '/';
+        $path = realpath(catpath(@nodes[0 .. 1],'')) . '/';
     } else {
         $path = Cwd::cwd . '/';
     }
@@ -52,7 +53,7 @@ sub path_no_verify {
     return $path;
 }
 
-sub dirname { File::Basename::dirname(@_) }
+sub dirname { dirname(@_) }
 
 sub set_file_mode {
     my ($fh) = @_;
@@ -97,6 +98,29 @@ sub read_glob_content {
 
     return wantarray ? @content : join("", @content);
 }
+
+# Originally from script/dancer
+sub safe_mkdir {
+    my ($dir) = @_;
+    if (not -d $dir) {
+        print "+ $dir\n";
+        mkpath $dir or die "could not mkpath $dir: $!";
+    }
+    else {
+        print "  $dir\n";
+    }
+}
+
+# Originally from script/dancer
+sub write_data_to_file {
+    my ($data, $path) = @_;
+    open(my $fh, '>', $path)
+      or warn "Failed to write file to $path - $!" and return;
+    binmode($fh);
+    print {$fh} unpack 'u*', $data;
+    close $fh;
+}
+
 
 'Dancer::FileUtils';
 
