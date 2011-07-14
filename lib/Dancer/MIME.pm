@@ -41,9 +41,9 @@ sub add_type {
 
 sub add_alias {
     my($self, $alias, $orig) = @_;
-    my $type = $self->for_name($orig) || croak "Can't find a mime type for $orig to alias $alias to";
+    my $type = $self->for_name($orig);
     $self->add_type($alias, $type);
-    return;
+    return $type;
 }
 
 sub for_file {
@@ -62,28 +62,25 @@ sub name_or_type {
 
 sub for_name {
     my ($self, $name) = @_;
-    return $self->custom_types->{$name} || $self->mime_type->mimeTypeOf(lc $name) || $self->default;
+    return $self->custom_types->{lc $name} || $self->mime_type->mimeTypeOf(lc $name) || $self->default;
 }
 
 sub add_mime_type {
-    my ($self, $name, $type) = @_;
     Dancer::Deprecation->deprecated(feature => 'add_mime_type',
+                                    fatal => 1,
                                     reason => 'use the new "add" method');
-    $self->add_type($name => $type);
 }
 
 sub add_mime_alias {
-    my ($self, $alias, $orig) = @_;
     Dancer::Deprecation->deprecated(feature => 'add_mime_alias',
+                                    fatal => 1,
                                     reason => 'use the new "add_alias" method');
-    $self->add_alias($alias => $orig);
 }
 
 sub mime_type_for {
-    my ($self, $content_type) = @_;
     Dancer::Deprecation->deprecated(feature => 'mime_type_for',
+                                    fatal => 1,
                                     reason => 'use the new "name_or_type" method');
-    return $self->name_or_type($content_type);
 }
 
 42;

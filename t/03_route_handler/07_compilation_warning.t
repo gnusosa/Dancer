@@ -1,19 +1,20 @@
-use Test::More import => ['!pass'];
+use Test::More;
 
-use Dancer ':syntax';
+use Dancer ':syntax', ':tests';
 use Dancer::Test;
 use Dancer::Logger;
-use File::Temp qw/tempdir/;
 
-my $dir = tempdir(CLEANUP => 1, TMPDIR => 1);
+plan skip_all => "File::Temp 0.22 required"
+    unless Dancer::ModuleLoader->load( 'File::Temp', '0.22' );
+
+my $dir = File::Temp::tempdir(CLEANUP => 1, TMPDIR => 1);
 set appdir => $dir;
 Dancer::Logger->init('File');
 
 # perl <= 5.8.x won't catch the warning
 plan skip_all => 'Need perl >= 5.10' if $] < 5.010;
 
-set warnings => 1;
-set show_errors => 1;
+set warnings => 1, show_errors => 1;
 
 get '/warning' => sub {
     my $bar;
@@ -21,8 +22,8 @@ get '/warning' => sub {
 };
 
 my @tests = (
-    { path => '/warning', 
-	  expected => qr/Use of uninitialized value \$bar in concatenation/},
+    { path     => '/warning',
+      expected => qr/Use of uninitialized value \$bar in concatenation/ },
 );
 
 plan tests => scalar(@tests);

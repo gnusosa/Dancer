@@ -60,7 +60,7 @@ sub apply_renderer {
     my $content = $self->render($view, $tokens);
 
     Dancer::Factory::Hook->execute_hooks('after_template_render', \$content);
-    
+
     # make sure to avoid ( undef ) in list context return
     defined $content
       and return $content;
@@ -108,8 +108,14 @@ sub _prepare_tokens_options {
     $tokens->{perl_version}   = $];
     $tokens->{dancer_version} = $Dancer::VERSION;
     $tokens->{settings}       = Dancer::Config->settings;
-    $tokens->{request}        = Dancer::SharedData->request;
-    $tokens->{params}         = Dancer::SharedData->request->params;
+
+    # If we're processing a request, also add the request object, params and
+    # vars as tokens:
+    if (my $request = Dancer::SharedData->request) {
+        $tokens->{request}        = $request;
+        $tokens->{params}         = $request->params;
+        $tokens->{vars}           = Dancer::SharedData->vars;
+    }
 
     Dancer::App->current->setting('session')
       and $tokens->{session} = Dancer::Session->get;
@@ -123,18 +129,9 @@ sub _render_with_layout {
     Dancer::Deprecation::deprecated(
         feature => 'render_with_layout',
         version => '1.3000',
+        fatal   => 1,
         reason  => "use the 'engine' keyword to get the template engine, and use 'apply_layout' on the result",
     );
-
-    my $full_content = Dancer::Template->engine->apply_layout($content, $tokens, $options);
-
-    if (! defined $full_content) {
-          return Dancer::Error->new(
-            code    => 404,
-            message => "Page not found",
-        )->render();
-    }
-    return $full_content;
 }
 
 sub template {
@@ -143,13 +140,13 @@ sub template {
 
     # it's important that $tokens is not undef, so that things added to it via
     # a before_template in apply_renderer survive to the apply_layout. GH#354
-    $tokens ||= {}; 
+    $tokens  ||= {};
     $options ||= {};
 
     $content = $view ? Dancer::Template->engine->apply_renderer($view, $tokens)
                      : delete $options->{content};
 
-    defined $content and $full_content = 
+    defined $content and $full_content =
       Dancer::Template->engine->apply_layout($content, $tokens, $options);
 
     defined $full_content
@@ -174,6 +171,43 @@ Dancer::Template::Abstract - abstract class for Dancer's template engines
 
 This class is provided as a base class for each template engine. Any template
 engine must inherit from it and provide a set of methods described below.
+
+=head1 TEMPLATE TOKENS
+
+By default Dancer injects some tokens (or variables) to templates. The
+available templates are:
+
+=over 4
+
+=item C<perl_version>
+
+The current running Perl version.
+
+=item C<dancer_version>
+
+The current running Dancer version.
+
+=item C<settings>
+
+Hash to access current application settings.
+
+=item C<request>
+
+Hash to access your current request.
+
+=item C<params>
+
+Hash to access your request parameters.
+
+=item C<vars>
+
+Hash to access your defined variables (using C<vars>).
+
+=item C<session>
+
+Hash to access your session (if you have session enabled)
+
+=back
 
 =head1 INTERFACE
 

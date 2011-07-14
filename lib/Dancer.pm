@@ -5,7 +5,7 @@ use warnings;
 use Carp;
 use Cwd 'realpath';
 
-our $VERSION   = '1.3049_01';
+our $VERSION   = '1.3070';
 our $AUTHORITY = 'SUKRIA';
 
 use Dancer::App;
@@ -36,6 +36,7 @@ our @EXPORT    = qw(
   any
   before
   before_template
+  cookie
   cookies
   config
   content_type
@@ -61,8 +62,8 @@ our @EXPORT    = qw(
   load_app
   logger
   mime
-  mime_type
   options
+  param
   params
   pass
   path
@@ -103,6 +104,7 @@ sub any             { Dancer::App->current->registry->any_add(@_) }
 sub before          { Dancer::Hook->new('before', @_) }
 sub before_template { Dancer::Hook->new('before_template', @_) }
 sub captures        { Dancer::SharedData->request->params->{captures} }
+sub cookie          { Dancer::Cookies->cookie( @_ ) }
 sub cookies         { Dancer::Cookies->cookies }
 sub config          { Dancer::Config::settings() }
 sub content_type    { Dancer::SharedData->response->content_type(@_) }
@@ -136,13 +138,11 @@ sub logger          {
     set(logger => @_)
 }
 sub mime            { Dancer::MIME->instance() }
-sub mime_type       {
-    Dancer::Deprecation->deprecated(reason => "use 'mime' from Dancer.pm",fatal => 1)
-}
 sub options         { Dancer::App->current->registry->universal_add('options', @_) }
 sub params          { Dancer::SharedData->request->params(@_) }
+sub param           { params->{$_[0]} }
 sub pass            { Dancer::SharedData->response->pass(1) }
-sub path            { realpath(Dancer::FileUtils::path(@_)) }
+sub path            { Dancer::FileUtils::path(@_) }
 sub post            { Dancer::App->current->registry->universal_add('post', @_) }
 sub prefix          { Dancer::App->current->set_prefix(@_) }
 sub put             { Dancer::App->current->registry->universal_add('put',     @_) }
@@ -205,7 +205,7 @@ sub import {
     return if $syntax_only;
 
     $as_script = 1 if $ENV{PLACK_ENV};
-    
+
     Dancer::GetOpt->process_args() if !$as_script;
 
     _init_script_dir($script);
@@ -238,7 +238,7 @@ sub _load_app {
 
 sub _init_script_dir {
     my ($script) = @_;
-    
+
     my ($script_vol, $script_dirs, $script_name) =
       File::Spec->splitpath(File::Spec->rel2abs($script));
 
@@ -279,14 +279,15 @@ sub _init_script_dir {
       || $appdir);
 
     Dancer::setting(public => $ENV{DANCER_PUBLIC}
-      || Dancer::FileUtils::path_no_verify($appdir, 'public'));
+      || Dancer::FileUtils::path($appdir, 'public'));
 
     Dancer::setting(views => $ENV{DANCER_VIEWS}
-      || Dancer::FileUtils::path_no_verify($appdir, 'views'));
+      || Dancer::FileUtils::path($appdir, 'views'));
 
-    my ($res, $error) = Dancer::ModuleLoader->use_lib(Dancer::FileUtils::path_no_verify($appdir, 'lib'));
+    my ($res, $error) = Dancer::ModuleLoader->use_lib(Dancer::FileUtils::path($appdir, 'lib'));
     $res or croak "unable to set libdir : $error";
 }
+
 
 # Scheme grammar as defined in RFC 2396
 #  scheme = alpha *( alpha | digit | "+" | "-" | "." )
@@ -367,7 +368,7 @@ Dancer - lightweight yet powerful web application framework
     use Dancer;
 
     get '/hello/:name' => sub {
-        return "Why, hello there " . params->{name};
+        return "Why, hello there " . param('name');
     };
 
     dance;
@@ -418,7 +419,7 @@ L<Dancer::Plugins>.
 
 By default, C<use Dancer> exports all the functions below plus sets up
 your app.  You can control the exporting through the normal
-L<Exporter> means.  For example:
+L<Exporter> mechanism.  For example:
 
     # Just export the route controllers
     use Dancer qw(before after get post);
@@ -431,8 +432,8 @@ There are also some special tags to control exports and behaviour.
 
 =head2 :moose
 
-This will export everything except those functions which clash with
-Moose.  Currently that is L<after> and L<before>.
+This will export everything except functions which clash with
+Moose. Currently these are C<after> and C<before>.
 
 =head2 :syntax
 
@@ -442,10 +443,10 @@ handler.
 
 =head2 :tests
 
-This will export everything except those functions which clash with
-commonly used testing modules.  Currently that is L<pass>.
+This will export everything except functions which clash with
+commonly used testing modules. Currently these are C<pass>.
 
-These can be combined.  For example, while testing...
+It can be combined with other export pragmas. For example, while testing...
 
     use Test::More;
     use Dancer qw(:syntax :tests);
@@ -508,12 +509,12 @@ Defines a before filter:
         # do something with request, vars or params
     };
 
-The anonymous function which is given to C<before> will be executed before
-executing a route handler to handle the request.
+The anonymous function given to C<before> will be executed before executing a
+route handler to handle the request.
 
 If the function modifies the request's C<path_info> or C<method>, a new
-search for a matching route is performed and the filter is re-executed
-again. Considering that this can lead to an infinite loop, this mechanism
+search for a matching route is performed and the filter is re-executed.
+Considering that this can lead to an infinite loop, this mechanism
 is stopped after 10 times with an exception.
 
 The before filter can set a response with a redirection code (either
@@ -531,30 +532,55 @@ Defines a before_template filter:
     before_template sub {
         my $tokens = shift;
         # do something with request, vars or params
+        
+        # for example, adding a token to the template
+        $tokens->{token_name} = "some value";
     };
 
 The anonymous function which is given to C<before_template> will be executed
-before sending data and tokens to the template. Receives a hashref of the
+before sending data and tokens to the template. Receives a HashRef of the
 tokens that will be inserted into the template.
 
 This filter works as the C<before> and C<after> filter.
 
+Now the preferred way for this is to use C<hook>s (namely, the
+C<before_template> one). Check C<hook> documentation bellow.
+
 =head2 cookies
 
-Accesses cookies values, which returns a hashref of L<Dancer::Cookie> objects:
+Accesses cookies values, it returns a HashRef of L<Dancer::Cookie> objects:
 
     get '/some_action' => sub {
         my $cookie = cookies->{name};
         return $cookie->value;
     };
 
-In the case you have stored something else than a scalar in your cookie:
+In the case you have stored something else than a Scalar in your cookie:
 
     get '/some_action' => sub {
         my $cookie = cookies->{oauth};
         my %values = $cookie->value;
         return ($values{token}, $values{token_secret});
     };
+
+
+=head2 cookie
+
+Accesses a cookie value (or sets it). Note that this method will
+eventually be preferred over C<set_cookie>.
+
+    cookie lang => "fr-FR";              # set a cookie and return its value
+    cookie lang => "fr-FR", expires => "2 hours";   # extra cookie info
+    cookie "lang"                        # return a cookie value
+
+If your cookie value is a key/value URI string, like
+
+    token=ABC&user=foo
+
+C<cookie> will only return the first part (C<token=ABC>) if called in scalar context.
+Use list context to fetch them all:
+
+    my @values = cookie "name";
 
 =head2 config
 
@@ -571,7 +597,7 @@ Sets the B<content-type> rendered, for the current route handler:
     get '/cat/:txtfile' => sub {
         content_type 'text/plain';
 
-        # here we can dump the contents of params->{txtfile}
+        # here we can dump the contents of param('txtfile')
     };
 
 You can use abbreviations for content types. For instance:
@@ -579,11 +605,11 @@ You can use abbreviations for content types. For instance:
     get '/svg/:id' => sub {
         content_type 'svg';
 
-        # here we can dump the image with id params->{id}
+        # here we can dump the image with id param('id')
     };
 
 Note that if you want to change the default content-type for every route, you
-have to change the setting C<content_type> instead.
+have to change the C<content_type> setting instead.
 
 =head2 dance
 
@@ -668,13 +694,13 @@ something like:
 
      return forward '/home?authorized=1';
 
-But C<forward> supports an optional hash with parameters to be added
+But C<forward> supports an optional HashRef with parameters to be added
 to the actual parameters:
 
      return forward '/home', { authorized => 1 };
 
 Finally, you can add some more options to the forward method, in a
-third argument, also as a hash reference. At the moment that option is
+third argument, also as a HashRef. That option is currently
 only used to change the method of your request. Use with caution.
 
     return forward '/home', { auth => 1 }, { method => 'POST' };
@@ -685,8 +711,8 @@ Deserializes a Data::Dumper structure.
 
 =head2 from_json ($structure, %options)
 
-Deserializes a JSON structure. Can receive optional arguments. Those arguments 
-are valid L<JSON> arguments to change the behaviour of the default 
+Deserializes a JSON structure. Can receive optional arguments. Those arguments
+are valid L<JSON> arguments to change the behaviour of the default
 C<JSON::from_json> function.
 
 =head2 from_yaml ($structure)
@@ -695,8 +721,8 @@ Deserializes a YAML structure.
 
 =head2 from_xml ($structure, %options)
 
-Deserializes a XML structure. Can receive optional arguments. Thoses arguments 
-are valid L<XML::Simple> arguments to change the behaviour of the default 
+Deserializes a XML structure. Can receive optional arguments. These arguments
+are valid L<XML::Simple> arguments to change the behaviour of the default
 C<XML::Simple::XMLin> function.
 
 =head2 get
@@ -740,6 +766,9 @@ adds a custom header to response:
         header 'x-my-header' => 'shazam!';
     }
 
+Note that it will overwrite the old value of the header, if any. To avoid that,
+see L</push_header>.
+
 =head2 push_header
 
 Do the same as C<header>, but allow for multiple headers with the same name.
@@ -752,7 +781,7 @@ Do the same as C<header>, but allow for multiple headers with the same name.
 
 =head2 hook
 
-Adds a hook at some position.
+Adds a hook at some position. For example :
 
   hook before_serialization => sub {
     my $response = shift;
@@ -761,13 +790,13 @@ Adds a hook at some position.
 
 Supported B<before> hooks (in order of execution):
 
-=over 4
+=over
 
 =item before_deserializer
 
 This hook receives no arguments.
 
-  hook before_deserializer {
+  hook before_deserializer => sub {
     ...
   };
 
@@ -775,8 +804,28 @@ This hook receives no arguments.
 
 This hook receives as argument the path of the file to render.
 
-  hook before_file_render {
+  hook before_file_render => sub {
+    my $path = shift;
     ...
+  };
+
+
+=item before_error_init
+
+This hook receives as argument a L<Dancer::Error> object.
+
+  hook before_error_init => sub {
+    my $error = shift;
+    ...
+  };
+
+
+=item before_error_render
+
+This hook receives as argument a L<Dancer::Error> object.
+
+  hook before_error_render => sub {
+    my $error = shift;
   };
 
 =item before
@@ -789,28 +838,40 @@ This hook receives no arguments.
     ...
   };
 
-It's equivalent to
+is equivalent to
 
-  hook before sub {
+  hook before => sub {
     ...
   };
 
 =item before_template_render
 
-This hook receives as argument a HASHREF, containing the tokens.
+This is an alias to 'before_template'.
 
-This is an alias to 'before_template'
+This hook receives as argument a HashRef, containing the tokens that
+will be passed to the template. You can use it to add more tokens, or
+delete some specific token.
 
-  hook before_template_render sub {
+  hook before_template_render => sub {
     my $tokens = shift;
     delete $tokens->{user};
+    $tokens->{time} = localtime;
+  };
+
+is equivalent to
+
+  hook before_template => sub {
+    my $tokens = shift;
+    delete $tokens->{user};
+    $tokens->{time} = localtime;
   };
 
 =item before_layout_render
 
-This hook receives two arguments. The first one is a HASHREF containing the tokens. The second is a SCALARREF representing the content of the template.
+This hook receives two arguments. The first one is a HashRef containing the
+tokens. The second is a ScalarRef representing the content of the template.
 
-  hook before_layout_render sub {
+  hook before_layout_render => sub {
     my ($tokens, $html_ref) = @_;
     ...
   };
@@ -819,7 +880,7 @@ This hook receives two arguments. The first one is a HASHREF containing the toke
 
 This hook receives as argument a L<Dancer::Response> object.
 
-  hook before_serializer sub {
+  hook before_serializer => sub {
     my $response = shift;
     $response->content->{start_time} = time();
   };
@@ -828,13 +889,13 @@ This hook receives as argument a L<Dancer::Response> object.
 
 Supported B<after> hooks (in order of execution):
 
-=over 4
+=over
 
 =item after_deserializer
 
 This hook receives no arguments.
 
-  hook after_deserializer sub {
+  hook after_deserializer => sub {
     ...
   };
 
@@ -842,31 +903,35 @@ This hook receives no arguments.
 
 This hook receives as argument a L<Dancer::Response> object.
 
-  hook after_file_render sub {
+  hook after_file_render => sub {
     my $response = shift;
   };
 
 =item after_template_render
 
-This hook receives as argument a SCALARREF representing the content generated by the template.
+This hook receives as argument a ScalarRef representing the content generated
+by the template.
 
-  hook after_template_render sub {
+  hook after_template_render => sub {
     my $html_ref = shift;
   };
 
 =item after_layout_render
 
-This hook receives as argument a SCALARREF representing the content generated by the layout
+This hook receives as argument a ScalarRef representing the content generated
+by the layout
 
-  hook after_layout_render sub {
+  hook after_layout_render => sub {
     my $html_ref = shift;
   };
 
 =item after
 
+This is an alias for 'after'.
+
 This hook receives as argument a L<Dancer::Response> object.
 
-  hook after sub {
+  hook after => sub {
     my $response = shift;
   };
 
@@ -874,14 +939,6 @@ This is equivalent to
 
   after sub {
     my $response = shift;
-  };
-
-=item before_error_render
-
-This hook receives as argument a L<Dancer::Error> object.
-
-  hook before_error_render => sub {
-    my $error = shift;
   };
 
 =item after_error_render
@@ -902,7 +959,7 @@ This method is deprecated. Use C<set>:
 
 =head2 logger
 
-Deprecated. Use C<set logger => 'console'> to change current logger engine.
+Deprecated. Use C<<set logger => 'console'>> to change current logger engine.
 
 =head2 load
 
@@ -913,25 +970,34 @@ sugar around Perl's C<require>:
 
 =head2 load_app
 
-Loads a Dancer package. This method takes care to set the libdir to the current
-C<./lib> directory:
+Loads a Dancer package. This method sets the libdir to the current C<./lib>
+directory:
 
     # if we have lib/Webapp.pm, we can load it like:
     load_app 'Webapp';
+    # or with options
+    load_app 'Forum', prefix => '/forum', settings => {foo => 'bar'};
 
-Note that a package loaded using load_app B<must> import Dancer with the
-C<:syntax> option, in order not to change the application directory
-(which has been previously set for the caller script).
+Note that the package loaded using load_app B<must> import Dancer with the
+C<:syntax> option.
+
+To load multiple apps repeat load_app:
+
+    load_app 'one';
+    load_app 'two';
+
+The old way of loading multiple apps in one go (load_app 'one', 'two';) is
+deprecated.
 
 =head2 mime_type
 
-Deprecated. Check C<mime> below.
+Deprecated. See L</mime>.
 
 =head2 mime
 
 Shortcut to access the instance object of L<Dancer::MIME>. You should
 read the L<Dancer::MIME> documentation for full details, but the most
-commonly-used methods are summarised below:
+commonly-used methods are summarized below:
 
     # set a new mime type
     mime->add_type( foo => 'text/foo' );
@@ -955,7 +1021,20 @@ commonly-used methods are summarised below:
 =head2 params
 
 I<This method should be called from a route handler>.
-Alias for the L<Dancer::Request params accessor|Dancer::Request/"params">.
+It's an alias for the L<Dancer::Request params accessor|Dancer::Request/"params">. It returns
+an hash reference to all defined parameters. Check C<param> bellow to access quickly to a single
+parameter value.
+
+=head2 param
+
+I<This method should be called from a route handler>.
+This method is an accessor to the parameters hash table.
+
+   post '/login' => sub {
+       my $username = param "user";
+       my $password = param "pass";
+       # ...
+   }
 
 =head2 pass
 
@@ -974,10 +1053,13 @@ You should always C<return> after calling C<pass>:
 
 =head2 path
 
-Concatenates multiple path together, without worrying about the underlying
+Concatenates multiple paths together, without worrying about the underlying
 operating system:
 
     my $path = path(dirname($0), 'lib', 'File.pm');
+
+It also normalizes (cleans) the path aesthetically. It does not verify the
+path exists.
 
 =head2 post
 
@@ -1001,6 +1083,30 @@ You can unset the prefix value:
 
     prefix undef;
     get '/page1' => sub {}; will match /page1
+
+For a safer alternative you can use lexical prefix like this:
+
+    prefix '/home' => sub {
+        ## Prefix is set to '/home' here
+
+        get ...;
+        get ...;
+    };
+    ## prefix reset to the previous version here
+
+This makes it possible to nest prefixes:
+
+   prefix '/home' => sub {
+       ## some routes
+       
+      prefix '/private' => sub {
+         ## here we are under /home/private...
+
+         ## some more routes
+      };
+      ## back to /home
+   };
+   ## back to the root
 
 B<Notice:> once you have a prefix set, do not add a caret to the regex:
 
@@ -1040,7 +1146,7 @@ You can also force Dancer to return a specific 300-ish HTTP response code:
     get '/old/:resource', sub {
         redirect '/new/'.params->{resource}, 301;
     };
-    
+
 It is important to note that issuing a redirect by itself does not exit and
 redirect immediately, redirection is deferred until after the current route
 or filter has been processed. To exit and redirect immediately, use the return
@@ -1077,7 +1183,6 @@ instance, to use a custom layout:
 
     render_with_layout $content, {}, { layout => 'layoutname' };
 
-
 =head2 request
 
 Returns a L<Dancer::Request> object representing the current request.
@@ -1103,7 +1208,7 @@ saying C<return send_error(...)> instead.
 
 Lets the current route handler send a file to the client. Note that
 the path of the file must be relative to the B<public> directory unless you use
-the C<absolute> option (see below).
+the C<system_path> option (see below).
 
     get '/download/:file' => sub {
         send_file(params->{file});
@@ -1150,8 +1255,8 @@ Creates or updates cookie values:
 
     get '/some_action' => sub {
         set_cookie name => 'value',
-            expires => (time + 3600),
-            domain  => '.foo.com';
+                   expires => (time + 3600),
+                   domain  => '.foo.com';
     };
 
 In the example above, only 'name' and 'value' are mandatory.
@@ -1166,10 +1271,13 @@ You can also store more complex structure in your cookies:
         };
     };
 
-You can't store more complex structure than this. All your keys in your hash
-should be scalars; storing references will not work.
+You can't store more complex structure than this. All keys in the HashRef
+should be Scalars; storing references will not work.
 
 See L<Dancer::Cookie> for further options when creating your cookie.
+
+Note that this method will be eventually deprecated in favor of the
+new C<cookie> method.
 
 =head2 session
 
@@ -1202,6 +1310,11 @@ You may also need to clear a session:
         ...
     };
 
+If you need to fetch the session ID being used for any reason:
+
+    my $id = session->id;
+
+
 =head2 splat
 
 Returns the list of captures made from a route handler with a route pattern
@@ -1214,7 +1327,7 @@ which includes wildcards:
 
 There is also the extensive splat (A.K.A. "megasplat"), which allows extensive
 greedier matching, available using two asterisks. The additional path is broken
-down and returned as an arrayref:
+down and returned as an ArrayRef:
 
     get '/entry/*/tags/**' => sub {
         my ( $entry_id, $tags ) = splat;
@@ -1265,7 +1378,7 @@ produce an C<HTTP 200 OK> status code, meaning everything is OK:
 In that example, Dancer will notice that the status has changed, and will
 render the response accordingly.
 
-The status keyword receives either a numeric status code or its name in 
+The status keyword receives either a numeric status code or its name in
 lower case, with underscores as a separator for blanks - see the list in
 L<Dancer::HTTP/"HTTP CODES">.
 
@@ -1279,8 +1392,8 @@ Tells the route handler to build a response with the current template engine:
     };
 
 The first parameter should be a template available in the views directory, the
-second one (optional) is a hashref of tokens to interpolate, and the third
-(again optional) is a hashref of options.
+second one (optional) is a HashRef of tokens to interpolate, and the third
+(again optional) is a HashRef of options.
 
 For example, to disable the layout for a specific request:
 
@@ -1288,6 +1401,10 @@ For example, to disable the layout for a specific request:
         template 'index.tt', {}, { layout => undef };
     };
 
+Some tokens are automatically added to your template (C<perl_version>,
+C<dancer_version>, C<settings>, C<request>, C<params>, C<vars> and, if
+you have sessions enabled, C<session>).  Check
+L<Dancer::Template::Abstract> for further details.
 
 =head2 to_dumper ($structure)
 
@@ -1324,20 +1441,20 @@ L<Dancer::Request::Upload> object. You can access all parsed uploads via:
     };
 
 If you named multiple input of type "file" with the same name, the upload
-keyword will return an array of Dancer::Request::Upload objects:
+keyword will return an Array of Dancer::Request::Upload objects:
 
     post '/some/route' => sub {
         my ($file1, $file2) = upload('files_input');
         # $file1 and $file2 are Dancer::Request::Upload objects
     };
 
-You can also access the raw hashref of parsed uploads via the current request
+You can also access the raw HashRef of parsed uploads via the current request
 object:
 
     post '/some/route' => sub {
         my $all_uploads = request->uploads;
         # $all_uploads->{'file_input_foo'} is a Dancer::Request::Upload object
-        # $all_uploads->{'files_input'} is an array ref of Dancer::Request::Upload objects
+        # $all_uploads->{'files_input'} is an ArrayRef of Dancer::Request::Upload objects
     };
 
 Note that you can also access the filename of the upload received via the params
@@ -1391,7 +1508,7 @@ C<vars> keyword.
 
 =head2 vars
 
-Returns the hashref of all shared variables set during the filter/route
+Returns the HashRef of all shared variables set during the filter/route
 chain:
 
     get '/path' => sub {
@@ -1412,7 +1529,11 @@ see the AUTHORS file that comes with this distribution for details.
 =head1 SOURCE CODE
 
 The source code for this module is hosted on GitHub
-L<http://github.com/sukria/Dancer>
+L<http://github.com/sukria/Dancer>.  Feel free to fork the repository and submit
+pull requests!  (See L<Dancer::Development> for details on how to contribute).
+
+Also, why not L<watch the repo|https://github.com/sukria/Dancer/toggle_watch> to
+keep up to date with the latest upcoming changes?
 
 
 =head1 GETTING HELP / CONTRIBUTING
@@ -1441,6 +1562,8 @@ The following modules are mandatory (Dancer cannot run without them):
 
 =item L<HTTP::Body>
 
+=item L<LWP>
+
 =item L<MIME::Types>
 
 =item L<URI>
@@ -1451,11 +1574,15 @@ The following modules are optional:
 
 =over 8
 
-=item L<Template> : In order to use TT for rendering views
+=item L<JSON> : needed to use JSON serializer
+
+=item L<Plack> : in order to use PSGI
+
+=item L<Template> : in order to use TT for rendering views
+
+=item L<XML::Simple> and L<XML:SAX> or L<XML:Parser> for XML serialization
 
 =item L<YAML> : needed for configuration file support
-
-=item L<File::MimeInfo::Simple>
 
 =back
 

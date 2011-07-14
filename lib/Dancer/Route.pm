@@ -38,6 +38,10 @@ sub init {
         croak "cannot create Dancer::Route without a pattern";
     }
 
+    # If the route is a Regexp, store it directly
+    $self->regexp($self->pattern) 
+      if ref($self->pattern) eq 'Regexp';
+
     $self->check_options();
     $self->app(Dancer::App->current);
     $self->prefix(Dancer::App->current->prefix) if not $self->prefix;
@@ -88,9 +92,9 @@ sub match {
     }
 
     Dancer::Logger::core("  --> got ".
-        map { defined $_ ? $_ : 'undef' } @values) 
+        map { defined $_ ? $_ : 'undef' } @values)
         if @values;
-    
+
     # if some named captures found, return captures
     # no warnings is for perl < 5.10
     if (my %captures =
@@ -106,8 +110,8 @@ sub match {
     return unless @values;
 
     # save the route pattern that matched
-    # TODO : as soon as we have proper Dancer::Internal, we should remove 
-    # that, it's just a quick hack for plugins to access the matching 
+    # TODO : as soon as we have proper Dancer::Internal, we should remove
+    # that, it's just a quick hack for plugins to access the matching
     # pattern.
     # NOTE: YOU SHOULD NOT USE THAT, OR IF YOU DO, YOU MUST KNOW
     # IT WILL MOVE VERY SOON
@@ -166,7 +170,7 @@ sub run {
     my $response = Dancer::SharedData->response;
 
     if ( $response && $response->is_forwarded ) {
-        my $new_req = 
+        my $new_req =
             Dancer::Request->forward($request, $response->{forward});
         my $marshalled = Dancer::Handler->handle_request($new_req);
 
@@ -252,9 +256,9 @@ sub _init_prefix {
     my $prefix = $self->prefix;
 
     if ($self->is_regexp) {
-        my $regexp = $self->regexp || $self->pattern;
+        my $regexp = $self->regexp;
         if ($regexp !~ /^$prefix/) {
-            $self->{pattern} = qr{${prefix}${regexp}};
+            $self->regexp(qr{${prefix}${regexp}});
         }
     }
     elsif ($self->pattern eq '/') {
@@ -278,24 +282,19 @@ sub _init_prefix {
 
 sub equals {
     my ($self, $route) = @_;
-
-    # TODO remove this hack when r() is deprecated
-    my $r1 = $self->regexp  || $self->pattern;
-    my $r2 = $route->regexp || $route->pattern;
-    return $r1 eq $r2;
+    return $self->regexp eq $route->regexp;
 }
 
 sub is_regexp {
     my ($self) = @_;
-    return ($self->pattern && (ref($self->pattern) eq 'Regexp'))
-      || $self->regexp;
+    return defined $self->regexp;
 }
 
 sub _build_regexp {
     my ($self) = @_;
 
     if ($self->is_regexp) {
-        $self->{_compiled_regexp} = $self->regexp || $self->pattern;
+        $self->{_compiled_regexp} = $self->regexp;
         $self->{_compiled_regexp} = qr/^$self->{_compiled_regexp}$/;
         $self->{_should_capture} = 1;
     }

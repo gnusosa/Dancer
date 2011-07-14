@@ -5,18 +5,20 @@ use Dancer ':syntax';
 use Dancer::Request;
 use Dancer::Test;
 use Dancer::FileUtils;
-use File::Temp qw(tempdir);
 use Test::More 'import' => ['!pass'];
 
+plan skip_all => "File::Temp 0.22 required"
+    unless Dancer::ModuleLoader->load( 'File::Temp', '0.22' );
 
 sub test_path {
     my ($file, $dir) = @_;
     is dirname($file), $dir, "dir of $file is $dir";
 }
 
+my $filename = "some_\x{1A9}_file.txt";
 
 my $content = qq{------BOUNDARY
-Content-Disposition: form-data; name="test_upload_file"; filename="yappo.txt"
+Content-Disposition: form-data; name="test_upload_file"; filename="$filename"
 Content-Type: text/plain
 
 SHOGUN
@@ -55,14 +57,14 @@ plan tests => 21;
 do {
     open my $in, '<', \$content;
     my $req = Dancer::Request->new(
-        {
-            'psgi.input'   => $in,
-            CONTENT_LENGTH => length($content),
-            CONTENT_TYPE   => 'multipart/form-data; boundary=----BOUNDARY',
-            REQUEST_METHOD => 'POST',
-            SCRIPT_NAME    => '/',
-            SERVER_PORT    => 80,
-        }
+       env => {
+               'psgi.input'   => $in,
+               CONTENT_LENGTH => length($content),
+               CONTENT_TYPE   => 'multipart/form-data; boundary=----BOUNDARY',
+               REQUEST_METHOD => 'POST',
+               SCRIPT_NAME    => '/',
+               SERVER_PORT    => 80,
+              }
     );
     Dancer::SharedData->request($req);
 
@@ -80,7 +82,7 @@ do {
 
     note "headers";
     is_deeply $uploads[0]->headers, {
-        'Content-Disposition' => q[form-data; name="test_upload_file"; filename="yappo.txt"],
+        'Content-Disposition' => qq[form-data; name="test_upload_file"; filename="$filename"],
         'Content-Type'        => 'text/plain',
     };
 
@@ -103,7 +105,7 @@ do {
       "filename is accessible via params";
 
     # copy_to, link_to
-    my $dest_dir = tempdir(CLEANUP => 1, TMPDIR => 1);
+    my $dest_dir = File::Temp::tempdir(CLEANUP => 1, TMPDIR => 1);
     my $dest_file = File::Spec->catfile( $dest_dir, $upload->basename );
     $upload->copy_to($dest_file);
     ok( ( -f $dest_file ), "file '$dest_file' has been copied" );
@@ -125,7 +127,7 @@ do {
 };
 
 # test with Dancer::Test
-my $dest_dir = tempdir(CLEANUP => 1, TMPDIR => 1);
+my $dest_dir = File::Temp::tempdir(CLEANUP => 1, TMPDIR => 1);
 my $dest_file = File::Spec->catfile( $dest_dir, 'foo' );
 
 post(

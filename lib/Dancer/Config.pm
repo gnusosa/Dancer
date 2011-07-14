@@ -13,12 +13,13 @@ use Carp;
 
 use Encode;
 
-@EXPORT_OK = qw(setting mime_types);
+@EXPORT_OK = qw(setting);
 
 my $SETTINGS = {};
 
 # mergeable settings
 my %MERGEABLE = map { ($_ => 1) } qw( plugins handlers );
+my %_LOADED;
 
 sub settings {$SETTINGS}
 
@@ -26,6 +27,9 @@ my $setters = {
     logger => sub {
         my ($setting, $value) = @_;
         Dancer::Logger->init($value, settings());
+    },
+    log_file => sub {
+        Dancer::Logger->init(setting("logger"), setting());
     },
     session => sub {
         my ($setting, $value) = @_;
@@ -71,6 +75,7 @@ my $setters = {
         $Carp::Verbose = $traces ? 1 : 0;
     },
 };
+$setters->{log_path} = $setters->{log_file};
 
 my $normalizers = {
     charset => sub {
@@ -88,13 +93,6 @@ my $normalizers = {
         return $name;
     },
 };
-
-sub mime_types {
-    Dancer::Deprecation->deprecated(
-        reason => "use 'mime' from Dancer.pm",
-        fatal => 1,
-    );
-}
 
 sub normalize_setting {
     my ($class, $setting, $value) = @_;
@@ -118,6 +116,7 @@ sub setting {
         while (@_) {
             my $setting = shift;
             my $value   = shift;
+
             _set_setting  ($setting, $value);
 
             # At the moment, with any kind of hierarchical setter,
@@ -178,10 +177,16 @@ sub load {
     confess "Configuration file found but YAML is not installed"
       unless Dancer::ModuleLoader->load('YAML');
 
-    load_settings_from_yaml(conffile);
+    if (!$_LOADED{conffile()}) {
+        load_settings_from_yaml(conffile);
+        $_LOADED{conffile()}++;
+    }
 
     my $env = environment_file;
-    load_settings_from_yaml($env) if -f $env;
+    if (-f $env && !$_LOADED{$env}) {
+        load_settings_from_yaml($env);
+        $_LOADED{$env}++;
+    }
 
     foreach my $key (grep { $setters->{$_} } keys %$SETTINGS) {
         $setters->{$key}->($key, $SETTINGS->{$key});
@@ -238,6 +243,7 @@ sub load_default_settings {
 load_default_settings();
 
 1;
+
 __END__
 
 =pod
@@ -356,6 +362,22 @@ C<text/plain>.
 
 =head2 File / directory locations
 
+=head3 environment (string)
+
+This is the name of the environment that should be used. Standard
+Dancer applications have a C<environments> folder with specific
+configuration files for different environments (usually development
+and production environments). They specify different kind of error
+reporting, deployment details, etc. These files are read after the
+generic C<config.yml> configuration file.
+
+The running environment can be set with:
+
+   set environment => "production";
+
+Note that this variable is also used as a default value if other
+values are not defined.
+
 =head3 appdir (directory)
 
 This is the path where your application will live.  It's where Dancer
@@ -414,9 +436,18 @@ If set to true, tells Dancer to consider all warnings as blocking errors.
 If set to true, Dancer will display full stack traces when a warning or a die
 occurs. (Internally sets Carp::Verbose). Default to false.
 
+=head3 log_path (string)
+
+Folder where the ``file C<logger>'' saves logfiles.
+
+=head3 log_file (string)
+
+Name of the file to create when ``file C<logger>'' is active. It
+defaults to the C<environment> setting contents.
+
 =head3 logger (enum)
 
-Select which logger to use.  For example, to write to log files in C<logdir>:
+Select which logger to use.  For example, to write to log files in C<log_path>:
 
     logger: file
 
@@ -511,6 +542,28 @@ default, sessions are disabled in Dancer, you must choose a session engine to
 use them.
 
 See L<Dancer::Session> for supported engines and their respective configuration.
+
+=head3 session_expires
+
+The session expiry time in seconds, or as e.g. "2 hours" (see
+L<Dancer::Cookie/expires>.  By default, there is no specific expiry time.
+
+=head3 session_name
+
+The name of the cookie to store the session ID in.  Defaults to
+C<dancer.session>.  This can be overridden by certain session engines.
+
+=head3 session_secure
+
+The user's session ID is stored in a cookie.  If the C<session_secure> setting
+is set to a true value, the cookie will be marked as secure, meaning it should
+only be sent over HTTPS connections.
+
+=head3 session_is_http_only
+
+This setting defaults to 1 and instructs the session cookie to be
+created with the C<HttpOnly> option active, meaning that JavaScript
+will not be able to access to its value.
 
 
 =head2 auto_page (boolean)

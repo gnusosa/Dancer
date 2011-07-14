@@ -4,7 +4,6 @@ use warnings;
 use Carp;
 use base 'Dancer::Logger::Abstract';
 
-use File::Temp qw/tempdir/;
 use Dancer::Config 'setting';
 use Dancer::FileUtils qw(open_file);
 use IO::File;
@@ -20,14 +19,12 @@ sub logdir {
             carp "log directory $logroot doesn't exist, am unable to create it";
             return;
         }
-    } else {
-        unless($logroot = tempdir(CLEANUP => 1, TMPDIR => 1)) {
-            carp "cannot create temp log directory";
-            return;
-        }
     }
 
-    my $expected_path = Dancer::FileUtils::path_no_verify($logroot, 'logs');
+    my $expected_path = $logroot                                  ?
+                        Dancer::FileUtils::path($logroot, 'logs') :
+                        Dancer::FileUtils::path('logs');
+
     return $expected_path if (-d $expected_path && -x _ && -w _);
 
     unless (-w $logroot and -x _) {
@@ -47,10 +44,12 @@ sub init {
 
     my $logdir = logdir();
     return unless ($logdir);
-    my $logfile = setting('environment');
+
+    my $logfile = setting('log_file') || setting('environment').".log";
 
     mkdir($logdir) unless(-d $logdir);
-    $logfile = File::Spec->catfile($logdir, "$logfile.log");
+    $logfile = File::Spec->catfile($logdir, $logfile);
+
     my $fh;
     unless($fh = open_file('>>', $logfile)) {
         carp "unable to create or append to $logfile";
@@ -96,8 +95,8 @@ file.
 
 =head2 logdir
 
-Returns the log directory, decided by "logs" either in "appdir" setting or in a
-temp directory. It's also possible to specify a logs directory with the log_path option.
+Returns the log directory, decided by "logs" either in "appdir" setting.
+It's also possible to specify a logs directory with the log_path option.
 
   setting log_path => $dir;
 
